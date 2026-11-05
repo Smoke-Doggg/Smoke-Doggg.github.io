@@ -1,6 +1,8 @@
 (function () {
   'use strict';
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var STAT_HOST = (document.body && document.body.getAttribute('data-stat-host')) ||
+    'https://stat.prostokey.com';
   var head = document.getElementById('head');
   if (head) {
     var onScroll = function () {
@@ -448,7 +450,7 @@
       TR:'Турция', AE:'ОАЭ', GE:'Грузия', AM:'Армения', RS:'Сербия',
       TH:'Таиланд', IN:'Индия', FR:'Франция', GB:'Великобритания',
       KG:'Киргизия', UZ:'Узбекистан'};
-    fetch('https://stat.prostokey.com/watch-api/ip')
+    fetch(STAT_HOST + '/watch-api/ip')
       .then(function (r) { if (!r.ok) throw 0; return r.json(); })
       .then(function (d) {
         myIp = d.ip || '';
@@ -524,7 +526,7 @@
     try { ref = JSON.parse(raw); } catch (err) { return; }
     if (!ref || !ref.src || Date.now() - ref.ts > REF_MAX_AGE_MS) return;
     try {
-      reliableFetch('https://stat.prostokey.com/watch-api/ref?src=' + encodeURIComponent(ref.src) + '&evt=convert');
+      reliableFetch(STAT_HOST + '/watch-api/ref?src=' + encodeURIComponent(ref.src) + '&evt=convert');
     } catch (err) {  }
     try { sessionStorage.removeItem('vpnp_ref'); } catch (err) {} // не считать дважды с двух кнопок подряд
   }, true); // capture — сработает раньше, чем браузер уйдёт по ссылке
@@ -545,7 +547,7 @@
       syncPause();
     });
   }
-  var HIT = 'https://stat.prostokey.com/watch-api/hit';
+  var HIT = STAT_HOST + '/watch-api/hit';
   var МЕТКА_ЗАМЕРА = /(^|[?&])lh=1(&|$)/.test(location.search);
   var АВТОМАТ = navigator.webdriver === true || МЕТКА_ЗАМЕРА;
   var RETRY_KEY = 'vpnp_retry_q';
@@ -653,8 +655,10 @@
   try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
   var h1Variant = '';
   try { h1Variant = sessionStorage.getItem('vpnp_h1_variant') || ''; } catch (e) {}
+  var HOST = (/^(www\.)?(prostokey\.com|spokno\.fyi)$/.test(location.hostname) &&
+    location.hostname.replace(/^www\./, '')) || '';
   send({
-    e: 'view', p: page, r: source(), d: device(), w: widthBucket(),
+    e: 'view', h: HOST, p: page, r: source(), d: device(), w: widthBucket(),
     t: document.documentElement.getAttribute('data-theme') ||
        (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
     tz: tz, n: firstInSession ? '1' : '0', v: h1Variant
@@ -672,6 +676,28 @@
     });
   };
   window.addEventListener('scroll', onScroll, { passive: true });
+  var liveSent = false, acted = false, visibleMs = 0, lastTick = Date.now(), maxPct = 0;
+  var liveCheck = function () {
+    if (liveSent || !acted || !HOST) return;
+    if (visibleMs >= 10000 || maxPct >= 25) {
+      liveSent = true;
+      send({ e: 'live', h: HOST, p: page });
+    }
+  };
+  ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(function (n) {
+    window.addEventListener(n, function () { acted = true; liveCheck(); }, { passive: true, capture: true });
+  });
+  window.addEventListener('scroll', function () {
+    var h = document.documentElement.scrollHeight - window.innerHeight;
+    if (h > 0) maxPct = Math.max(maxPct, Math.round((window.scrollY / h) * 100));
+    liveCheck();
+  }, { passive: true });
+  setInterval(function () {
+    var now = Date.now();
+    if (document.visibilityState === 'visible') visibleMs += Math.min(now - lastTick, 2000);
+    lastTick = now;
+    liveCheck();
+  }, 1000);
   document.addEventListener('click', function (ev) {
     var a = ev.target.closest && ev.target.closest('a, button');
     if (!a) return;
